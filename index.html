@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>商品レビュー分析ツール — 商品開発インサイト</title>
+    <meta name="description" content="複数の商品URLからレビューを分析し、評価を上げる/下げる要因を特定。商品開発に活かせるインサイトを抽出。">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+    <header id="header">
+        <div class="header-content">
+            <h1>📊 商品レビュー分析ツール</h1>
+            <p class="subtitle">商品URLを入力してレビューを分析し、開発に活かせるインサイトを抽出</p>
+        </div>
+    </header>
+
+    <nav id="tab-nav" class="hidden">
+        <button class="tab-btn active" data-tab="summary">📊 クロス商品サマリ</button>
+        <button class="tab-btn" data-tab="detail">🔍 個別商品分析</button>
+        <button class="tab-btn" data-tab="input">✏️ URL入力に戻る</button>
+    </nav>
+
+    <main id="app">
+        <!-- URL入力画面 -->
+        <section id="input-view" class="view active">
+            <div class="input-card glass-card">
+                <h2>商品URLを入力（1行に1つ）</h2>
+                <textarea id="url-input" placeholder="https://item.rakuten.co.jp/shop1/product-a/&#10;https://item.rakuten.co.jp/shop2/product-b/&#10;https://item.rakuten.co.jp/shop3/product-c/"></textarea>
+                <div id="product-preview" class="product-preview hidden"></div>
+                <div class="input-actions">
+                    <button id="btn-analyze" class="btn-primary">🔍 レビューを一括分析する</button>
+                    <button id="btn-demo" class="btn-secondary">💡 デモで試す（サンプル商品で体験）</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 分析中プログレス -->
+        <section id="progress-view" class="view">
+            <div class="progress-card glass-card">
+                <div class="spinner"></div>
+                <h2 id="progress-text">分析中...</h2>
+                <div class="progress-bar-container">
+                    <div id="progress-bar" class="progress-bar"></div>
+                </div>
+                <p id="progress-detail" class="progress-detail">レビューを取得しています</p>
+            </div>
+        </section>
+
+        <!-- クロス商品サマリ画面 -->
+        <section id="summary-view" class="view">
+            <div id="summary-header" class="summary-header glass-card"></div>
+            <div class="summary-grid">
+                <div id="positive-factors" class="factor-card glass-card"></div>
+                <div id="negative-factors" class="factor-card glass-card"></div>
+            </div>
+            <div id="differentiation-hints" class="hints-card glass-card"></div>
+            <div id="comparison-table" class="comparison-card glass-card"></div>
+        </section>
+
+        <!-- 個別商品分析画面 -->
+        <section id="detail-view" class="view">
+            <div id="product-selector" class="product-selector glass-card"></div>
+            <div id="aspect-matrix" class="glass-card"></div>
+            <div class="detail-grid">
+                <div id="negative-ranking" class="ranking-card glass-card"></div>
+                <div id="positive-ranking" class="ranking-card glass-card"></div>
+            </div>
+            <div id="improvement-requests" class="glass-card"></div>
+            <div id="review-sentences" class="glass-card"></div>
+        </section>
+    </main>
+
+    <script type="module" src="/src/main.js"></script>
+</body>
+</html>
