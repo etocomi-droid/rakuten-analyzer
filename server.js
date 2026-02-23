@@ -325,11 +325,17 @@ function getDemoReviewsForProduct(index) {
     return reviewSets[index] || reviewSets[0];
 }
 
-app.listen(PORT, () => {
-    console.log(`🚀 Server running on http://localhost:${PORT}`);
-    console.log('📊 レビュー分析ツール（文レベル構造化分析 + クロス商品サマリ）');
-    console.log('   POST /api/parse-urls  — URL解析');
-    console.log('   POST /api/analyze     — 一括分析（URL未入力でデモモード）');
-    console.log('   GET  /api/product/:i/details — 個別商品詳細');
-    console.log('   GET  /api/summary     — クロス商品サマリ');
-});
+// Vercel環境ではapp.listen不要（サーバーレス関数として動作）
+if (!process.env.VERCEL) {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server running on http://localhost:${PORT}`);
+        console.log('📊 レビュー分析ツール（文レベル構造化分析 + クロス商品サマリ）');
+        console.log('   POST /api/parse-urls  — URL解析');
+        console.log('   POST /api/analyze     — 一括分析（URL未入力でデモモード）');
+        console.log('   GET  /api/product/:i/details — 個別商品詳細');
+        console.log('   GET  /api/summary     — クロス商品サマリ');
+    });
+}
+
+// Vercelサーバーレス関数用エクスポート
+export default app;
