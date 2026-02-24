@@ -13,6 +13,7 @@ const $ = (id) => document.getElementById(id);
 // ===== Init =====
 document.addEventListener('DOMContentLoaded', () => {
     setupEventListeners();
+    loadHistory();
 });
 
 function setupEventListeners() {
@@ -26,6 +27,7 @@ function setupEventListeners() {
             if (tab === 'input') {
                 showView('input');
                 $('tab-nav').classList.add('hidden');
+                loadHistory();
             } else if (tab === 'summary') {
                 showView('summary');
             } else if (tab === 'detail') {
@@ -34,6 +36,24 @@ function setupEventListeners() {
             document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
         });
+    });
+
+    // Export buttons
+    $('btn-export-csv').addEventListener('click', exportCSV);
+    $('btn-export-pdf').addEventListener('click', exportPDF);
+
+    // Save button & dialog
+    $('btn-save').addEventListener('click', () => {
+        $('save-title-input').value = state.analysisData?.summary?.category
+            ? `${state.analysisData.summary.category} 分析 ${new Date().toLocaleDateString('ja-JP')}`
+            : `分析 ${new Date().toLocaleDateString('ja-JP')}`;
+        $('save-dialog').classList.remove('hidden');
+    });
+    $('save-dialog-close').addEventListener('click', () => $('save-dialog').classList.add('hidden'));
+    $('btn-save-cancel').addEventListener('click', () => $('save-dialog').classList.add('hidden'));
+    $('btn-save-confirm').addEventListener('click', saveAnalysis);
+    $('save-dialog').addEventListener('click', (e) => {
+        if (e.target === $('save-dialog')) $('save-dialog').classList.add('hidden');
     });
 }
 
@@ -432,3 +452,137 @@ function shortenName(name) {
     if (!name) return '';
     return name.length > 25 ? name.substring(0, 25) + '...' : name;
 }
+
+// ===== Export Functions =====
+function exportCSV() {
+    window.open(`${API}/api/export/csv`, '_blank');
+}
+
+function exportPDF() {
+    window.open(`${API}/api/export/report`, '_blank');
+}
+
+// ===== Save / History Functions =====
+async function saveAnalysis() {
+    const title = $('save-title-input').value.trim();
+    if (!title) {
+        $('save-title-input').focus();
+        return;
+    }
+
+    try {
+        $('btn-save-confirm').disabled = true;
+        $('btn-save-confirm').textContent = '保存中...';
+
+        const res = await fetch(`${API}/api/save`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ title }),
+        });
+
+        if (!res.ok) throw new Error('保存に失敗しました');
+
+        $('save-dialog').classList.add('hidden');
+        $('btn-save-confirm').disabled = false;
+        $('btn-save-confirm').textContent = '保存する';
+
+        // 成功フィードバック
+        const btn = $('btn-save');
+        btn.textContent = '✅ 保存しました';
+        btn.classList.add('saved');
+        setTimeout(() => {
+            btn.textContent = '💾 この分析を保存';
+            btn.classList.remove('saved');
+        }, 2000);
+
+    } catch (err) {
+        console.error('Save error:', err);
+        alert('保存エラー: ' + err.message);
+        $('btn-save-confirm').disabled = false;
+        $('btn-save-confirm').textContent = '保存する';
+    }
+}
+
+async function loadHistory() {
+    try {
+        const res = await fetch(`${API}/api/history`);
+        if (!res.ok) return;
+        const items = await res.json();
+
+        const panel = $('history-panel');
+        const list = $('history-list');
+
+        if (items.length === 0) {
+            panel.classList.add('hidden');
+            return;
+        }
+
+        panel.classList.remove('hidden');
+        list.innerHTML = items.map(item => `
+            <div class="history-card" data-id="${esc(item.id)}">
+                <div class="history-card-main" onclick="window.__loadHistory('${esc(item.id)}')">
+                    <div class="history-title">${esc(item.title)}</div>
+                    <div class="history-meta">
+                        <span>${esc(item.category || '未分類')}</span>
+                        <span>${item.productCount || 0}商品</span>
+                        <span>${item.totalReviews || 0}件</span>
+                        <span>${new Date(item.savedAt).toLocaleDateString('ja-JP')}</span>
+                    </div>
+                </div>
+                <button class="history-delete" onclick="event.stopPropagation();window.__deleteHistory('${esc(item.id)}')" title="削除">🗑️</button>
+            </div>
+        `).join('');
+
+    } catch (err) {
+        console.error('History load error:', err);
+    }
+}
+
+window.__loadHistory = async (id) => {
+    try {
+        showView('progress');
+        updateProgress(50, '保存済みデータを読み込んでいます...');
+
+        const res = await fetch(`${API}/api/history/${id}`);
+        if (!res.ok) throw new Error('読み込みに失敗しました');
+        const data = await res.json();
+
+        state.analysisData = data;
+        updateProgress(100, '完了！');
+        await sleep(400);
+
+        $('tab-nav').classList.remove('hidden');
+        renderSummary(data.summary, data.products);
+        showView('summary');
+        renderProductSelector(data.products);
+        loadProductDetail(0);
+
+    } catch (err) {
+        console.error('History load error:', err);
+        showView('input');
+        alert('読み込みエラー: ' + err.message);
+    }
+};
+
+window.__deleteHistory = async (id) => {
+    if (!confirm('この保存データを削除しますか？')) return;
+
+    try {
+        await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
+        // カードをアニメーション付きで削除
+        const card = document.querySelector(`.history-card[data-id="${id}"]`);
+        if (card) {
+            card.style.transition = 'opacity 0.3s, transform 0.3s';
+            card.style.opacity = '0';
+            card.style.transform = 'translateX(-20px)';
+            setTimeout(() => {
+                card.remove();
+                if ($('history-list').children.length === 0) {
+                    $('history-panel').classList.add('hidden');
+                }
+            }, 300);
+        }
+    } catch (err) {
+        console.error('Delete error:', err);
+    }
+};

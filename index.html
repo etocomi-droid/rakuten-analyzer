@@ -1,14 +1,18 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>商品レビュー分析ツール — 商品開発インサイト</title>
     <meta name="description" content="複数の商品URLからレビューを分析し、評価を上げる/下げる要因を特定。商品開発に活かせるインサイトを抽出。">
     <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Noto+Sans+JP:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
     <link rel="stylesheet" href="/src/style.css">
 </head>
+
 <body>
     <header id="header">
         <div class="header-content">
@@ -28,12 +32,19 @@
         <section id="input-view" class="view active">
             <div class="input-card glass-card">
                 <h2>商品URLを入力（1行に1つ）</h2>
-                <textarea id="url-input" placeholder="https://item.rakuten.co.jp/shop1/product-a/&#10;https://item.rakuten.co.jp/shop2/product-b/&#10;https://item.rakuten.co.jp/shop3/product-c/"></textarea>
+                <textarea id="url-input"
+                    placeholder="https://item.rakuten.co.jp/shop1/product-a/&#10;https://item.rakuten.co.jp/shop2/product-b/&#10;https://item.rakuten.co.jp/shop3/product-c/"></textarea>
                 <div id="product-preview" class="product-preview hidden"></div>
                 <div class="input-actions">
                     <button id="btn-analyze" class="btn-primary">🔍 レビューを一括分析する</button>
                     <button id="btn-demo" class="btn-secondary">💡 デモで試す（サンプル商品で体験）</button>
                 </div>
+            </div>
+
+            <!-- 保存済み分析の履歴パネル -->
+            <div id="history-panel" class="history-panel glass-card hidden">
+                <h2>📂 保存済みの分析結果</h2>
+                <div id="history-list" class="history-list"></div>
             </div>
         </section>
 
@@ -52,6 +63,12 @@
         <!-- クロス商品サマリ画面 -->
         <section id="summary-view" class="view">
             <div id="summary-header" class="summary-header glass-card"></div>
+            <!-- エクスポート＆保存ボタン -->
+            <div class="export-bar">
+                <button id="btn-export-csv" class="btn-export" title="CSV形式でダウンロード">📥 CSV出力</button>
+                <button id="btn-export-pdf" class="btn-export" title="印刷用レポートを表示">🖨️ レポート出力</button>
+                <button id="btn-save" class="btn-export btn-save" title="分析結果を保存">💾 この分析を保存</button>
+            </div>
             <div class="summary-grid">
                 <div id="positive-factors" class="factor-card glass-card"></div>
                 <div id="negative-factors" class="factor-card glass-card"></div>
@@ -73,6 +90,22 @@
         </section>
     </main>
 
+    <!-- 保存ダイアログ -->
+    <div id="save-dialog" class="drilldown-overlay hidden">
+        <div class="drilldown-modal" style="max-width:450px;">
+            <button class="drilldown-close" id="save-dialog-close">&times;</button>
+            <h3>💾 分析結果を保存</h3>
+            <p style="color:var(--text-secondary);font-size:0.85rem;margin-bottom:16px;">タイトルを付けて保存します。後からいつでも再表示できます。
+            </p>
+            <input type="text" id="save-title-input" class="save-title-input" placeholder="例: ワイヤレスイヤホン比較分析">
+            <div style="display:flex;gap:12px;margin-top:16px;">
+                <button id="btn-save-confirm" class="btn-primary" style="flex:1;">保存する</button>
+                <button id="btn-save-cancel" class="btn-secondary">キャンセル</button>
+            </div>
+        </div>
+    </div>
+
     <script type="module" src="/src/main.js"></script>
 </body>
+
 </html>

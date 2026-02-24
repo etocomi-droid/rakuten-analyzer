@@ -4,10 +4,13 @@ import dotenv from 'dotenv';
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
 import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 import { fileURLToPath } from 'url';
 import { parseMultipleUrls } from './lib/url-parser.js';
 import { analyzeAllReviews } from './lib/sentence-analyzer.js';
 import { generateCrossSummary } from './lib/cross-analyzer.js';
+import { generateCSV, generatePrintableHTML } from './lib/report-generator.js';
 
 dotenv.config();
 
@@ -167,6 +170,109 @@ app.get('/api/summary', (req, res) => {
         return res.status(404).json({ error: '先に分析を実行してください' });
     }
     res.json(analysisCache.summary);
+});
+
+// ========== CSVエクスポート ==========
+app.get('/api/export/csv', (req, res) => {
+    if (!analysisCache) {
+        return res.status(404).json({ error: '先に分析を実行してください' });
+    }
+    const csv = generateCSV(analysisCache);
+    const filename = `review-analysis-${new Date().toISOString().slice(0, 10)}.csv`;
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+});
+
+// ========== 印刷用HTMLレポート ==========
+app.get('/api/export/report', (req, res) => {
+    if (!analysisCache) {
+        return res.status(404).json({ error: '先に分析を実行してください' });
+    }
+    const html = generatePrintableHTML(analysisCache);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(html);
+});
+
+// ========== 分析結果の保存 ==========
+const DATA_DIR = path.join(__dirname, 'data');
+if (!process.env.VERCEL) {
+    try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* ignore */ }
+}
+
+app.post('/api/save', (req, res) => {
+    try {
+        if (!analysisCache) {
+            return res.status(404).json({ error: '保存する分析結果がありません' });
+        }
+        const id = crypto.randomUUID().slice(0, 8);
+        const title = req.body.title || `分析 ${new Date().toLocaleDateString('ja-JP')}`;
+        const entry = {
+            id,
+            title,
+            savedAt: new Date().toISOString(),
+            category: analysisCache.summary.category,
+            productCount: analysisCache.summary.productCount,
+            totalReviews: analysisCache.summary.totalReviews,
+            data: analysisCache,
+        };
+        try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* ignore */ }
+        fs.writeFileSync(path.join(DATA_DIR, `${id}.json`), JSON.stringify(entry, null, 2), 'utf-8');
+        res.json({ id, title, savedAt: entry.savedAt });
+    } catch (err) {
+        console.error('Save error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/history', (req, res) => {
+    try {
+        try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch { /* ignore */ }
+        const files = fs.readdirSync(DATA_DIR).filter(f => f.endsWith('.json'));
+        const items = files.map(f => {
+            const raw = JSON.parse(fs.readFileSync(path.join(DATA_DIR, f), 'utf-8'));
+            return {
+                id: raw.id,
+                title: raw.title,
+                savedAt: raw.savedAt,
+                category: raw.category,
+                productCount: raw.productCount,
+                totalReviews: raw.totalReviews,
+            };
+        }).sort((a, b) => new Date(b.savedAt) - new Date(a.savedAt));
+        res.json(items);
+    } catch (err) {
+        console.error('History error:', err.message);
+        res.json([]);
+    }
+});
+
+app.get('/api/history/:id', (req, res) => {
+    try {
+        const filePath = path.join(DATA_DIR, `${req.params.id}.json`);
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: '保存データが見つかりません' });
+        }
+        const entry = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+        analysisCache = entry.data;
+        res.json(entry.data);
+    } catch (err) {
+        console.error('History load error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.delete('/api/history/:id', (req, res) => {
+    try {
+        const filePath = path.join(DATA_DIR, `${req.params.id}.json`);
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+        res.json({ success: true });
+    } catch (err) {
+        console.error('Delete error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
 });
 
 // ========== 商品情報取得 ==========
