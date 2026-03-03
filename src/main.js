@@ -278,7 +278,7 @@ function renderDetail(data) {
     renderAspectMatrix(analysis.aspectMatrix, productInfo.name);
 
     // Negative ranking
-    renderRanking($('negative-ranking'), '🔴 ここがダメ', analysis.topNegativeSentences, 'negative');
+    renderRanking($('negative-ranking'), '🔴 ここを要チェック', analysis.topNegativeSentences, 'negative');
 
     // Positive ranking
     renderRanking($('positive-ranking'), '🟢 ここが良い', analysis.topPositiveSentences, 'positive');
@@ -414,7 +414,7 @@ function renderSentences(sentences) {
             <div class="filter-bar">
                 <button class="filter-btn ${filter === 'all' ? 'active' : ''}" data-filter="all">全て</button>
                 <button class="filter-btn ${filter === 'positive' ? 'active' : ''}" data-filter="positive">😊 ポジティブ</button>
-                <button class="filter-btn ${filter === 'negative' ? 'active' : ''}" data-filter="negative">😠 ネガティブ</button>
+                <button class="filter-btn ${filter === 'negative' ? 'active' : ''}" data-filter="negative">😠 要チェック</button>
                 <button class="filter-btn ${filter === 'request' ? 'active' : ''}" data-filter="request">💡 要望</button>
             </div>
             ${filtered.slice(0, 50).map(s => `
