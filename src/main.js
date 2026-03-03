@@ -136,7 +136,7 @@ function renderSummary(summary, products) {
     renderFactors($('positive-factors'), '🟢 評価が上がる要因', summary.positiveFactors, 'positive', summary.productCount);
 
     // Negative factors
-    renderFactors($('negative-factors'), '🔴 評価が下がる要因', summary.negativeFactors, 'negative', summary.productCount);
+    renderFactors($('negative-factors'), '🔴 ここを要チェック', summary.negativeFactors, 'negative', summary.productCount);
 
     // Differentiation hints
     renderHints($('differentiation-hints'), summary.differentiationHints);
