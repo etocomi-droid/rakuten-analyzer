@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
+import iconv from 'iconv-lite';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
@@ -92,7 +93,8 @@ app.post('/api/analyze', async (req, res) => {
             if (!urls || urls.trim() === '') {
                 reviews = getDemoReviewsForProduct(i);
             } else {
-                reviews = await scrapeReviewsFromUrl(parsed[i], 3);
+                // parsed[i]にproducts[i]のreviewNumericIdをマージして渡す
+                reviews = await scrapeReviewsFromUrl({ ...parsed[i], reviewNumericId: products[i].reviewNumericId }, 3);
             }
 
             const analysis = analyzeAllReviews(reviews);
@@ -276,36 +278,91 @@ app.delete('/api/history/:id', (req, res) => {
 });
 
 // ========== 商品情報取得 ==========
+/**
+ * HTMLレスポンスをEUC-JP/UTF-8に応じてデコードする
+ */
+async function fetchHtmlDecoded(url, headers) {
+    const response = await fetch(url, { headers });
+    const arrayBuf = await response.arrayBuffer();
+    const buffer = Buffer.from(arrayBuf);
+    // Content-Typeヘッダーまたはデフォルトでエンコーディングを判定
+    const contentType = response.headers.get('content-type') || '';
+    const enc = /euc-jp/i.test(contentType) ? 'EUC-JP'
+        : /shift.jis/i.test(contentType) ? 'Shift_JIS'
+            : 'UTF-8';
+    return iconv.decode(buffer, enc);
+}
+
 async function fetchProductInfo(parsed) {
     try {
         const url = `https://item.rakuten.co.jp/${parsed.shopCode}/${parsed.itemId}/`;
-        const response = await fetch(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept-Language': 'ja',
-            },
-        });
-        const html = await response.text();
+        const reqHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        };
+        const html = await fetchHtmlDecoded(url, reqHeaders);
         const $ = cheerio.load(html);
 
+        // 商品名
         const name = $('title').text().split('|')[0]?.trim() || $('h1').first().text().trim() || `${parsed.shopCode}/${parsed.itemId}`;
-        const priceText = $('[class*="price"]').first().text();
-        const priceMatch = priceText.match(/[\d,]+/);
-        const price = priceMatch ? parseInt(priceMatch[0].replace(/,/g, '')) : 0;
+
+        // 価格: meta[itemprop="price"] から確実に取得
+        const priceContent = $('meta[itemprop="price"]').attr('content');
+        const price = priceContent ? parseInt(priceContent, 10) : 0;
+
+        // カテゴリー: JSON-LD BreadcrumbListから取得（最も信頼性が高い）
+        const categories = [];
+        $('script[type="application/ld+json"]').each((_, el) => {
+            if (categories.length > 0) return; // すでに取得済み
+            try {
+                const json = JSON.parse($(el).html());
+                if (json['@type'] === 'BreadcrumbList' && Array.isArray(json.itemListElement)) {
+                    for (const item of json.itemListElement) {
+                        const catName = item.item?.name || item.name || '';
+                        // 楽天市場トップ（1番目）は除外
+                        if (catName && item.position > 1) {
+                            categories.push(catName);
+                        }
+                    }
+                }
+            } catch { /* JSONパースエラーは無視 */ }
+        });
+
+        // レビューの数値ID: ページ内のreview.rakuten.co.jpリンクから取得
+        let reviewNumericId = null;
+        $('a[href*="review.rakuten.co.jp/item/"]').each((_, el) => {
+            if (reviewNumericId) return;
+            const href = $(el).attr('href') || '';
+            const m = href.match(/\/item\/1\/(\d+)_(\d+)/);
+            if (m) reviewNumericId = { shopNumId: m[1], itemNumId: m[2] };
+        });
+        if (!reviewNumericId) {
+            const bodyHtml = $.html();
+            const m = bodyHtml.match(/review\.rakuten\.co\.jp\/item\/1\/(\d+)_(\d+)/);
+            if (m) reviewNumericId = { shopNumId: m[1], itemNumId: m[2] };
+        }
+
+        console.log(`✅ fetchProductInfo: ${name.substring(0, 40)} | price=${price} | cats=[${categories.join(', ')}] | reviewId=${JSON.stringify(reviewNumericId)}`);
 
         return {
             name: name.substring(0, 80),
             price,
+            categories: categories.slice(0, 5),
             shopCode: parsed.shopCode,
             itemId: parsed.itemId,
+            reviewNumericId,
             url: parsed.originalUrl,
         };
-    } catch {
+    } catch (err) {
+        console.error('fetchProductInfo error:', err.message);
         return {
             name: `${parsed.shopCode}/${parsed.itemId}`,
             price: 0,
+            categories: [],
             shopCode: parsed.shopCode,
             itemId: parsed.itemId,
+            reviewNumericId: null,
             url: parsed.originalUrl,
         };
     }
@@ -315,41 +372,76 @@ async function fetchProductInfo(parsed) {
 async function scrapeReviewsFromUrl(parsed, maxPages = 3) {
     const reviews = [];
 
+    // 数値IDが取得済みかチェック（fetchProductInfoで設定される）
+    const reviewNumericId = parsed.reviewNumericId || null;
+
     for (let page = 1; page <= maxPages; page++) {
         try {
-            const url = `https://review.rakuten.co.jp/item/${parsed.shopCode}/${parsed.itemId}/?p=${page}`;
+            let url;
+            if (reviewNumericId) {
+                // 正しいURL形式: /item/1/{shopNumId}_{itemNumId}/{page}.1/
+                url = `https://review.rakuten.co.jp/item/1/${reviewNumericId.shopNumId}_${reviewNumericId.itemNumId}/${page}.1/`;
+            } else {
+                // フォールバック（従来形式、動かない場合が多い）
+                url = `https://review.rakuten.co.jp/item/${parsed.shopCode}/${parsed.itemId}/?p=${page}`;
+            }
+
+            console.log(`📝 Scraping reviews: ${url}`);
             const response = await fetch(url, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                     'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Referer': 'https://review.rakuten.co.jp/',
                 },
             });
 
-            if (!response.ok) break;
+            if (!response.ok) {
+                console.log(`  → HTTP ${response.status}, stopping`);
+                break;
+            }
             const html = await response.text();
             const $ = cheerio.load(html);
             let found = false;
 
-            // パターン1: 新しいレビュー構造
-            $('div.review-item, div.revRvwUserSec, div[class*="review"]').each((_, el) => {
+            // 現在の楽天レビューページ構造: CSS Modulesのハッシュクラスを使用
+            // クラスプレフィックス: review-body, reviewer-info, rating, star-container
+            $('[class*="review-body"]').each((_, el) => {
                 const $el = $(el);
-                const text = $el.find('.review-body, .revRvwUserEntryCmt, [class*="comment"], [class*="body"]').text().trim();
-                const ratingText = $el.find('[class*="star"], [class*="rating"]').text();
-                const ratingMatch = ratingText.match(/(\d+(\.\d+)?)/);
-                const rating = ratingMatch ? parseFloat(ratingMatch[1]) : 0;
-                const title = $el.find('.review-title, [class*="title"]').first().text().trim();
+                const text = $el.text().trim();
+                if (!text || text.length < 10) return;
 
-                if (text && text.length > 10) {
-                    reviews.push({ text, rating: Math.min(rating, 5), title });
-                    found = true;
+                // 親または祖先要素から評価を取得
+                let rating = 0;
+                const $ancestor = $el.parents().filter((_, a) => {
+                    return $(a).find('[class*="rating"]').length > 0 ||
+                        $(a).find('[class*="star-container"]').length > 0;
+                }).first();
+
+                // 星の数を数える（filledな星アイコン）
+                const starCount = $ancestor.find('[class*="rex-rating-filled"], [class*="star-filled"]').length;
+                if (starCount > 0) {
+                    rating = Math.min(starCount, 5);
+                } else {
+                    // テキストから評価数値を抽出
+                    const ratingText = $ancestor.find('[class*="rating"]').first().text();
+                    const m = ratingText.match(/^(\d)/);
+                    if (m) rating = parseInt(m[1]);
                 }
+
+                // タイトルは兄弟または親内の別要素
+                const title = $ancestor.find('[class*="title"]').first().text().trim() ||
+                    $el.parent().find('[class*="title"]').first().text().trim();
+
+                reviews.push({ text: text.replace(/さらに表示$/, '').trim(), rating: Math.min(rating, 5), title });
+                found = true;
             });
 
-            // パターン2
+            // フォールバック: 旧構造 (revRvw系クラス)
             if (!found) {
-                $('div.revRvwUserSec, div.revRvw').each((_, el) => {
+                $('div.revRvwUserSec, div.revRvw, td.revRvwCmnt').each((_, el) => {
                     const $el = $(el);
-                    const text = $el.find('.revRvwUserEntryCmt, .revRvwComment, td.revRvwCmnt').text().trim();
+                    const text = ($el.is('td') ? $el : $el.find('.revRvwUserEntryCmt, .revRvwComment, td.revRvwCmnt')).text().trim();
                     const ratingText = $el.find('.revUserRvwStar, .revRvwUserEntryRate, [class*="star"]').text();
                     const ratingMatch = ratingText.match(/(\d+(\.\d+)?)/);
                     const rating = ratingMatch ? parseFloat(ratingMatch[1]) : 0;
@@ -360,6 +452,7 @@ async function scrapeReviewsFromUrl(parsed, maxPages = 3) {
                 });
             }
 
+            console.log(`  → Found ${reviews.length} reviews so far (page ${page})`);
             if (!found) break;
             if (page < maxPages) await sleep(DELAY_MS);
         } catch (err) {
