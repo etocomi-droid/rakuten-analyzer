@@ -462,7 +462,19 @@ function exportPDF() {
     window.open(`${API}/api/export/report`, '_blank');
 }
 
-// ===== Save / History Functions =====
+// ===== Save / History Functions (localStorage based) =====
+const LS_KEY = 'rakuten-analyzer-history';
+
+function getHistory() {
+    try {
+        return JSON.parse(localStorage.getItem(LS_KEY) || '[]');
+    } catch { return []; }
+}
+
+function setHistory(items) {
+    localStorage.setItem(LS_KEY, JSON.stringify(items));
+}
+
 async function saveAnalysis() {
     const title = $('save-title-input').value.trim();
     if (!title) {
@@ -474,13 +486,22 @@ async function saveAnalysis() {
         $('btn-save-confirm').disabled = true;
         $('btn-save-confirm').textContent = '保存中...';
 
-        const res = await fetch(`${API}/api/save`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ title }),
-        });
+        const id = Math.random().toString(36).slice(2, 10);
+        const data = state.analysisData;
+        const entry = {
+            id,
+            title,
+            savedAt: new Date().toISOString(),
+            category: data?.summary?.category || '',
+            productCount: data?.summary?.productCount || 0,
+            totalReviews: data?.summary?.totalReviews || 0,
+            data,
+        };
 
-        if (!res.ok) throw new Error('保存に失敗しました');
+        const history = getHistory();
+        history.unshift(entry);
+        // 最大20件まで保持
+        setHistory(history.slice(0, 20));
 
         $('save-dialog').classList.add('hidden');
         $('btn-save-confirm').disabled = false;
@@ -495,6 +516,8 @@ async function saveAnalysis() {
             btn.classList.remove('saved');
         }, 2000);
 
+        loadHistory();
+
     } catch (err) {
         console.error('Save error:', err);
         alert('保存エラー: ' + err.message);
@@ -505,9 +528,7 @@ async function saveAnalysis() {
 
 async function loadHistory() {
     try {
-        const res = await fetch(`${API}/api/history`);
-        if (!res.ok) return;
-        const items = await res.json();
+        const items = getHistory();
 
         const panel = $('history-panel');
         const list = $('history-list');
@@ -540,21 +561,28 @@ async function loadHistory() {
 
 window.__loadHistory = async (id) => {
     try {
+        const items = getHistory();
+        const entry = items.find(i => i.id === id);
+        if (!entry) throw new Error('保存データが見つかりません');
+
         showView('progress');
         updateProgress(50, '保存済みデータを読み込んでいます...');
 
-        const res = await fetch(`${API}/api/history/${id}`);
-        if (!res.ok) throw new Error('読み込みに失敗しました');
-        const data = await res.json();
+        state.analysisData = entry.data;
+        // サーバー側キャッシュも同期する（エクスポート等のため）
+        await fetch(`${API}/api/analyze`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ urls: (entry.data?.products || []).map(p => p.url).join('\n') }),
+        }).catch(() => { }); // エラーは無視（表示のみでもOK）
 
-        state.analysisData = data;
         updateProgress(100, '完了！');
         await sleep(400);
 
         $('tab-nav').classList.remove('hidden');
-        renderSummary(data.summary, data.products);
+        renderSummary(entry.data.summary, entry.data.products);
         showView('summary');
-        renderProductSelector(data.products);
+        renderProductSelector(entry.data.products);
         loadProductDetail(0);
 
     } catch (err) {
@@ -568,7 +596,9 @@ window.__deleteHistory = async (id) => {
     if (!confirm('この保存データを削除しますか？')) return;
 
     try {
-        await fetch(`${API}/api/history/${id}`, { method: 'DELETE' });
+        const items = getHistory().filter(i => i.id !== id);
+        setHistory(items);
+
         // カードをアニメーション付きで削除
         const card = document.querySelector(`.history-card[data-id="${id}"]`);
         if (card) {
@@ -586,3 +616,5 @@ window.__deleteHistory = async (id) => {
         console.error('Delete error:', err);
     }
 };
+
+
